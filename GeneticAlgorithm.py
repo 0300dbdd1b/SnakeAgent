@@ -1,4 +1,5 @@
 from Game import Game
+import concurrent.futures
 import numpy as np
 import random
 
@@ -39,6 +40,13 @@ class NeuralNetwork:
             child.weights[i] = np.where(mask, parent1.weights[i], parent2.weights[i])
         return child
 
+    def blend_crossover(parent1, parent2, alpha=0.5):
+        child = NeuralNetwork([w.shape[0] for w in parent1.weights] + [parent1.weights[-1].shape[1]])
+        for i in range(len(parent1.weights)):
+            # Blend the weights with a factor of α
+            child.weights[i] = (1 - alpha) * parent1.weights[i] + alpha * parent2.weights[i]
+        return child
+
 class GeneticAlgorithm:
     def __init__(self, population_size=50, mutation_rate=0.05, layer_sizes=[14, 16, 3], top_n_percent=10, elite_size=5):
         self.population_size = population_size
@@ -48,6 +56,25 @@ class GeneticAlgorithm:
         self.elite_size = elite_size  # number of top agents to keep across generations
         self.population = [NeuralNetwork(layer_sizes) for _ in range(self.population_size)]
         self.elite_agents = []  # Store the top agents across all generations
+
+
+    def evaluate_population(self, population):
+        # Using concurrent.futures for parallel evaluation
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            # Submit all fitness evaluations concurrently
+            fitness_scores = list(executor.map(self.evaluate_agent, population))
+        return fitness_scores
+
+    def evaluate_agent(self, agent):
+        game = Game(width=20, height=20, max_moves=200, render=False)  # Adjust to your game setup
+        while not game.game_over:
+            state = game.get_state()
+            state_vector = encode_state(state)
+            action = choose_action(agent, state_vector)
+            game.change_direction(action)
+            game.update()
+        return calculate_fitness(game)
+
 
     def evolve(self, scores):
         # Sort population based on fitness scores (descending order)
@@ -71,7 +98,8 @@ class GeneticAlgorithm:
         while len(next_generation) < self.population_size:
             # Randomly select two parents for crossover
             parent1, parent2 = random.sample(parents, 2)
-            child = NeuralNetwork.crossover(parent1, parent2)
+            child = NeuralNetwork.crossover(parent1, parent2) #NOTE: Switch between top_n crossover and blending
+            #child = NeuralNetwork.blend_crossover(parent1, parent2, 0.7)
             child.mutate(self.mutation_rate)
             next_generation.append(child)
 
@@ -84,29 +112,30 @@ class GeneticAlgorithm:
     def get_last_agent(self):
         return self.population[-1]
 
+
 def encode_state(state):
     direction = state['direction']
     dir_one_hot = [0, 0, 0, 0]
     if direction == (0, -1):
-        dir_one_hot[0] = 1
+        dir_one_hot[0] = 1  # Up
     elif direction == (0, 1):
-        dir_one_hot[1] = 1
+        dir_one_hot[1] = 1  # Down
     elif direction == (-1, 0):
-        dir_one_hot[2] = 1
+        dir_one_hot[2] = 1  # Left
     elif direction == (1, 0):
-        dir_one_hot[3] = 1
+        dir_one_hot[3] = 1  # Right
 
     head_x, head_y = state['snake_head']
     food_x, food_y = state['food']
     food_dir = [0, 0, 0, 0]
     if food_x < head_x:
-        food_dir[2] = 1
+        food_dir[2] = 1  # Food is left
     elif food_x > head_x:
-        food_dir[3] = 1
+        food_dir[3] = 1  # Food is right
     if food_y < head_y:
-        food_dir[0] = 1
+        food_dir[0] = 1  # Food is up
     elif food_y > head_y:
-        food_dir[1] = 1
+        food_dir[1] = 1  # Food is down
 
     # Distance to walls
     dist_up = head_y
@@ -114,13 +143,46 @@ def encode_state(state):
     dist_left = head_x
     dist_right = state['width'] - head_x
 
-    distance_features = [dist_up / state['height'], dist_down / state['height'], dist_left / state['width'], dist_right / state['width']]
+    distance_features = [
+        dist_up / state['height'], 
+        dist_down / state['height'], 
+        dist_left / state['width'], 
+        dist_right / state['width']
+    ]
 
     # Obstacle detection (front, left, right)
     front_dir = direction
     left_dir = (-direction[1], direction[0])
     right_dir = (direction[1], -direction[0])
 
+    # Calculate distances to obstacles in front, left, and right
+    def distance_to_obstacle(start_x, start_y, dir_x, dir_y, state):
+        dist = 0
+        while True:
+            start_x += dir_x
+            start_y += dir_y
+            if (
+                start_x < 0 or start_x >= state['width'] or
+                start_y < 0 or start_y >= state['height'] or
+                (start_x, start_y) in state['snake']
+            ):
+                break
+            dist += 1
+        return dist
+
+    dist_front = distance_to_obstacle(head_x, head_y, front_dir[0], front_dir[1], state)
+    dist_left = distance_to_obstacle(head_x, head_y, left_dir[0], left_dir[1], state)
+    dist_right = distance_to_obstacle(head_x, head_y, right_dir[0], right_dir[1], state)
+
+    # Normalize distances
+    max_distance = max(state['width'], state['height'])
+    distance_to_obstacles = [
+        dist_front / max_distance,
+        dist_left / max_distance,
+        dist_right / max_distance
+    ]
+
+    # Existing obstacle detection (binary)
     front_cell = (head_x + front_dir[0], head_y + front_dir[1])
     left_cell = (head_x + left_dir[0], head_y + left_dir[1])
     right_cell = (head_x + right_dir[0], head_y + right_dir[1])
@@ -134,7 +196,9 @@ def encode_state(state):
     score = state['score'] / (state['width'] * state['height'])
     moves_left = state['moves_left'] / 1000
 
-    feature_vector = dir_one_hot + food_dir + distance_features + obstacles + [score, moves_left]
+    feature_vector = (
+        dir_one_hot + food_dir + distance_features + distance_to_obstacles + obstacles + [score, moves_left]
+    )
     return np.array(feature_vector, dtype=np.float32)
 
 def choose_action(network, state_vector):
@@ -147,6 +211,7 @@ def calculate_fitness(game):
     food_x, food_y = game.food
     distance_to_fruit = abs(head_x - food_x) + abs(head_y - food_y)
     survival_bonus = game.total_moves / 100  # Reward for staying alive longer
-    fitness = game.score #- (distance_to_fruit / 10)
+    #fitness = (game.score * game.score) / (game.total_moves  * distance_to_fruit)
+    fitness = game.score 
     return fitness
 

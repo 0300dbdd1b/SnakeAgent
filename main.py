@@ -9,13 +9,13 @@ import matplotlib.pyplot as plt
 
 def main():
     # Hyperparameters
-    GENERATIONS = 300
-    POPULATION_SIZE = 100
-    MUTATION_RATE = 0.2
+    GENERATIONS = 100
+    POPULATION_SIZE = 500
+    MUTATION_RATE = 0.3
     MAX_MOVES = 200
 
-    layer_sizes = [17, 8, 3]  # Example of a neural network with more features
-    ga = GeneticAlgorithm(population_size=POPULATION_SIZE, mutation_rate=MUTATION_RATE, layer_sizes=layer_sizes, elite_size=7, top_n_percent=10)
+    layer_sizes = [20, 16, 8, 3]  # Example of a neural network with more features
+    ga = GeneticAlgorithm(population_size=POPULATION_SIZE, mutation_rate=MUTATION_RATE, layer_sizes=layer_sizes, elite_size=3, top_n_percent=5)
 
     best_global_score = 0  # Track the best score across all generations
     game_renderer = Game(width=20, height=20, max_moves=MAX_MOVES, render=True)
@@ -65,7 +65,7 @@ def main():
                 best_agent_states_actions = states_actions_taken  # Store the full sequence of the best agent
 
             # Print Agent score, Generation best score, and Global best score
-            print(f"Agent [{generation + 1}/{idx + 1}] Score: {game.score} - Best Generation Score: {best_generation_score} - Best Global Score: {best_global_score}")
+            #print(f"Agent [{generation + 1}/{idx + 1}] Score: {game.score} - Best Generation Score: {best_generation_score} - Best Global Score: {best_global_score}")
 
         # Calculate and append the average score for this generation
         avg_score = sum(scores) / len(scores)
