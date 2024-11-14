@@ -1,71 +1,30 @@
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import gc
+import os
 import neat
-import pygame
-from GameEngine import GameEngine
-from GameRenderer import GameRenderer
-from NEAT import fitness_function, get_inputs_from_gamestate
+from game_logic import GameState
+from renderer import GameRenderer
+from neat_utils import GameStats, eval_genomes, replay_best_genome
 
-# Path to NEAT configuration file
-CONFIG_PATH = "config-feedforward.txt"
-
-def render_best_game(genome, config):
-    game_engine = GameEngine()
-    renderer = GameRenderer(width=game_engine.width, height=game_engine.height)
-    net = neat.nn.FeedForwardNetwork.create(genome, config)
-    done = False
-    clock = pygame.time.Clock()
-
-    while not done:
-        gamestate = game_engine.get_state()
-        inputs = get_inputs_from_gamestate(gamestate)
-        action = net.activate(inputs)
-        direction = ['forward', 'left', 'right'][np.argmax(action)]
-        done = not game_engine.MoveRelative(direction)
-        renderer.render_gamestate(gamestate)
-        clock.tick(10)
-
-    renderer.close()
-
-def eval_genome_task(genome, config):
-    fitness_function(genome, config)  # Runs the fitness function
-    return genome.fitness
-
-def eval_genomes(genomes, config):
-    global high_score
-    with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(eval_genome_task, genome, config): (genome_id, genome) for genome_id, genome in genomes}
-        for future in as_completed(futures):
-            genome_id, genome = futures[future]
-            try:
-                fitness = future.result()
-                # print(f"fitness : {fitness}")
-                if fitness > high_score:
-                    print(f"New high score achieved: {fitness}")
-                    high_score = fitness
-                    render_best_game(genome, config)
-
-            except Exception as e:
-                print(f"Error evaluating genome {genome_id}: {e}")
-
-    gc.collect()
-
-def run_neat():
-    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                                neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                                CONFIG_PATH)
-    
-    # Create a population
-    population = neat.Population(config)
-    population.add_reporter(neat.StdOutReporter(True))
+def run_neat(config_path):
+    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                        neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                        config_path)
+    # Initialize population and add reporters
+    p = neat.Population(config)
+    p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
-    population.add_reporter(stats)
-
-    # Run NEAT and find the best agent
-    winner = population.run(eval_genomes, 10000)
-    print(f'\nBest genome:\n{winner}')
+    p.add_reporter(stats)
+    # Initialize game statistics and renderer
+    game_stats = GameStats()
+    renderer = GameRenderer()
+    # Run evolution
+    winner = p.run(lambda genomes, config: eval_genomes(genomes, config, GameState, game_stats, renderer), 500)
+    print(f"\nBest Score Achieved: {game_stats.best_score}")
+    print(f"Best Generation: {game_stats.best_generation}")
+    replay_best_genome(config, game_stats.best_genome, GameState, renderer)
+    renderer.close()
+    return winner
 
 if __name__ == "__main__":
-    high_score = 0  # Initialize the high score to zero
-    run_neat()
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, "config-feedforward.txt")
+    run_neat(config_path)
