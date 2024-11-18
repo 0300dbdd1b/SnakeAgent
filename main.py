@@ -2,7 +2,7 @@ import os
 import neat
 from game_logic import GameState
 from renderer import GameRenderer
-from neat_utils import GameStats, eval_genomes, replay_best_genome
+from neat_utils import GameStats, eval_genomes
 
 def run_neat(config_path):
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
@@ -17,10 +17,9 @@ def run_neat(config_path):
     game_stats = GameStats()
     renderer = GameRenderer()
     # Run evolution
-    winner = p.run(lambda genomes, config: eval_genomes(genomes, config, GameState, game_stats, renderer), 500)
+    winner = p.run(lambda genomes, config: eval_genomes(genomes, config, GameState, game_stats, renderer), 1000)
     print(f"\nBest Score Achieved: {game_stats.best_score}")
     print(f"Best Generation: {game_stats.best_generation}")
-    replay_best_genome(config, game_stats.best_genome, GameState, renderer)
     renderer.close()
     return winner
 
